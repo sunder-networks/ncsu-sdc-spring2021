@@ -123,6 +123,40 @@ s3 ⚡️ stratum_bmv2 @ 50003
 mininet>
 ```
 
+Setting the pipeline will drop you into the p4runtime-sh
+```
+~/ncsu-sdc-spring2021/ (main)
+$ make set-pipeline
+*** Welcome to the IPython shell for P4Runtime ***
+P4Runtime sh >>> tables
+MyIngress.my_ports
+
+P4Runtime sh >>> actions
+MyIngress.drop
+MyIngress.set_output
+NoAction
+
+P4Runtime sh >>> te = table_entry["MyIngress.my_ports"](action="MyIngress.set_output")
+
+P4Runtime sh >>> te.match['ingress_port']="1"
+field_id: 1
+exact {
+  value: "\000\001"
+}
+
+
+P4Runtime sh >>> te.action['p']="2"
+param_id: 1
+value: "\000\002"
+
+
+P4Runtime sh >>> te.insert()
+
+P4Runtime sh >>> # if match source port of 1 send to port 2
+
+P4Runtime sh >>> # now insert the reverse rule
+```
+
 #### More details and references
 The [ForwardingPipelineConfig](https://github.com/p4lang/p4runtime/blob/v1.3.0/proto/p4/v1/p4runtime.proto#L696) message has two fields of interest, p4info and p4_device_config, these fields map to the artifacts `./build/bmv2/p4info.pb.txt` and `./build/bmv2/bmv2.json` respectively. The linked protobuf source code is distributed as part of the open source P4Runtime specification and service definition protobuf files to learn more please check out the documentation available on p4.org/specs .
 
