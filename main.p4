@@ -17,6 +17,21 @@ header ethernet_t {
     bit<48>   srcAddr;
     bit<16>   etherType;
 }
+header ipv4_t {
+    bit<4>    version;
+    bit<4>    ihl;
+    bit<8>    diffserv;
+    bit<16>   totalLen;
+    bit<16>   identification;
+    bit<3>    flags;
+    bit<13>   fragOffset;
+    bit<8>    ttl;
+    bit<8>    protocol;
+    bit<16>   hdrChecksum;
+    bit<32> srcAddr;
+    bit<32> dstAddr;
+}
+
 
 struct metadata {
     /* empty */
@@ -24,6 +39,7 @@ struct metadata {
 
 struct headers {
     ethernet_t   ethernet;
+    ipv4_t   ipv4;
 }
 
 /*************************************************************************
@@ -42,15 +58,13 @@ parser MyParser(packet_in packet,
     state parse_ethernet {
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
-            // TYPE_IPV4: parse_ipv4;
+            TYPE_IPV4: parse_ipv4;
             // TYPE_IPV6: parse_ipv6;
-            TYPE_FEED: parse_feed;
             default: accept;
         }
     }
-    state parse_feed {
-        // showing how new states get reached
-        // packet.extract(hdr.MyHeader)
+    state parse_ipv4 {
+        packet.extract(hdr.ipv4);
         transition accept;
     }
 
@@ -92,9 +106,28 @@ control MyIngress(inout headers hdr,
         }
         size = 64;
     }
+    action ipv4_forward(egressSpec_t p, bit<48> dmac) {
+        standard_metadata.egress_spec = p;
+        hdr.ethernet.dstAddr = dmac;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1 ;
+    }
+
+    table ipv4_routing {
+        key = {
+            hdr.ipv4.dstAddr: lpm;
+        }
+        actions = {
+            ipv4_forward;
+            drop;
+        }
+        size = 1024;
+    }
     
     apply {
         my_ports.apply();
+        if (hdr.ipv4.isValid()){
+            ipv4_routing.apply();
+        }
     }
 }
 
@@ -131,6 +164,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
     apply {
 
         packet.emit(hdr.ethernet);
+        packet.emit(hdr.ipv4);
     }
 }
 
