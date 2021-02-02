@@ -34,7 +34,7 @@ clean:
 	@rm -rf build
 start:
 	@docker rm -f  p4switch 2>/dev/null || true
-	@exec docker run -it  --rm --privileged --name p4switch ${MININET_IMAGE} --topo ${TOPO}
+	@exec docker run -it  -p 50000-50030:50000-50030 --rm --privileged --name p4switch ${MININET_IMAGE} --topo ${TOPO}
 
 TARGET_PORT=50001
 set-pipeline: build/bmv2/p4info.pb.txt
