@@ -9,6 +9,7 @@ MAKEFLAGS += --no-builtin-rules
 # Docker images
 COMPILER_IMAGE := opennetworking/p4c@sha256:bbc894835ad2057373fca9a5ba92a28c891328a39a88848a35aba44f7f3a7cda
 MININET_IMAGE := gcr.io/hotbox-sunos/mn@sha256:f849ad2d24ad6e176e4f0b268163d3ff1198a62c7b18381ddb224fd609585dc4
+SCAPY_IMAGE := ehlers/scapy@sha256:24527af82bde12bcd2fbeffe1ca8859300419d336ed717e41688235e64f14069
 # Source helper
 P4_SRC := $(wildcard *.p4)
 
@@ -30,6 +31,7 @@ build/bmv2/p4info.pb.txt: $(P4_SRC)
 	@echo "pipeline data written to: $(@D)"
 
 test: build
+	@docker run -it --rm --net=container:p4switch ${SCAPY_IMAGE} scapy
 clean:
 	@rm -rf build
 start:
