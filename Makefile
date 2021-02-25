@@ -34,7 +34,7 @@ test: build
 	@docker run -it --rm --net=container:p4switch ${SCAPY_IMAGE} scapy
 clean:
 	@rm -rf build
-start:
+start: clean build
 	@docker rm -f  p4switch 2>/dev/null || true
 	@exec docker run -it  -p 50000-50030:50000-50030 --rm --privileged --name p4switch ${MININET_IMAGE} --topo ${TOPO}
 
