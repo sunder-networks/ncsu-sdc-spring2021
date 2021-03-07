@@ -6,9 +6,11 @@
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
 
+const bit<32> NODE_ID = 0xA5;
 const bit<16> TYPE_IPV4 = 0x0800;
-const bit<16> TYPE_IPV6 = 0x86DD;
-const bit<16> TYPE_FEED = 0xFEED;
+const bit<2>  TYPE_INT = 0x1;
+const bit<1>  INT_LIST = 0x0;
+const bit<1>  INT_TEMINATE = 0x1;
 
 typedef bit<9>  egressSpec_t;
 
@@ -28,8 +30,21 @@ header ipv4_t {
     bit<8>    ttl;
     bit<8>    protocol;
     bit<16>   hdrChecksum;
-    bit<32> srcAddr;
-    bit<32> dstAddr;
+    bit<32>   srcAddr;
+    bit<32>   dstAddr;
+}
+
+header inth_t {
+    bit<2>    version;
+    bit<1>    append;
+    bit<1>    following;
+    bit<4>    availCount;
+    bit<6>    rsvd;
+    bit<9>    ingressPort;
+    bit<9>    egressPort;
+    bit<48>   ingressTime;
+    bit<48>   egressTime;
+    bit<32>   nodeID;
 }
 
 
@@ -38,8 +53,9 @@ struct metadata {
 }
 
 struct headers {
-    ethernet_t   ethernet;
-    ipv4_t   ipv4;
+    ethernet_t  ethernet;
+    ipv4_t      ipv4;
+    inth_t      inth;
 }
 
 /*************************************************************************
@@ -59,7 +75,6 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4: parse_ipv4;
-            // TYPE_IPV6: parse_ipv6;
             default: accept;
         }
     }
@@ -88,6 +103,7 @@ control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
 control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
+    
     action drop() {
         mark_to_drop(standard_metadata);
     }
@@ -122,12 +138,27 @@ control MyIngress(inout headers hdr,
         }
         size = 1024;
     }
+
+    action create_INT() {
+        inth_t i = {TYPE_INT,
+                  INT_TEMINATE,
+                  INT_TEMINATE, 
+                  0,
+                  0,
+                  standard_metadata.ingress_port,
+                  standard_metadata.egress_port,
+                  standard_metadata.ingress_global_timestamp,
+                  0, 
+                  NODE_ID};
+        hdr.inth = i;
+    }
     
     apply {
         my_ports.apply();
         if (hdr.ipv4.isValid()){
             ipv4_routing.apply();
         }
+        create_INT();
     }
 }
 
@@ -138,13 +169,14 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-    /*
-       The egress_port of a packet MUST be selected during INGRESS processing, 
-       and egress processing is NOT allowed to change it.
-        
-        https://p4.org/p4-spec/docs/PSA-v1.1.0.html#appendix-rationale-egress
-    */
-    apply {  }
+
+    action update_INT() {
+        hdr.inth.egressTime = standard_metadata.egress_global_timestamp;
+    }
+
+    apply { 
+        update_INT();        
+     }
 }
 
 /*************************************************************************
@@ -165,6 +197,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
 
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
+        packet.emit(hdr.inth);
     }
 }
 
