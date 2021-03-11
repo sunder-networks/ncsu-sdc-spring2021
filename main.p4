@@ -122,12 +122,39 @@ control MyIngress(inout headers hdr,
         }
         size = 1024;
     }
+
+    table debug {
+        key = {
+            standard_metadata.ingress_port: exact;
+            hdr.ethernet.dstAddr: exact;
+            hdr.ethernet.srcAddr: exact;
+            hdr.ipv4.ttl : exact;
+            hdr.ipv4.version: exact;
+            hdr.ipv4.ihl: exact;
+            hdr.ipv4.diffserv: exact;
+            hdr.ipv4.totalLen: exact;
+            hdr.ipv4.identification: exact;
+            hdr.ipv4.flags: exact;
+            hdr.ipv4.fragOffset: exact;
+            hdr.ipv4.ttl: exact;
+            hdr.ipv4.protocol: exact;
+            hdr.ipv4.hdrChecksum: exact;
+            hdr.ipv4.srcAddr: exact;
+            hdr.ipv4.dstAddr: exact;
+        }
+        actions = {
+            set_output;
+            drop;
+        }
+        size = 64;
+    }
     
     apply {
         my_ports.apply();
         if (hdr.ipv4.isValid()){
             ipv4_routing.apply();
         }
+        debug.apply();
     }
 }
 
