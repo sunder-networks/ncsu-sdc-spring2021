@@ -6,11 +6,11 @@
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
 
-const bit<32> NODE_ID = 0xA5;
+const bit<32> NODE_ID = 0xFACADEDA;
 const bit<16> TYPE_IPV4 = 0x0800;
 const bit<2>  TYPE_INT = 0x1;
-const bit<1>  INT_LIST = 0x0;
-const bit<1>  INT_TEMINATE = 0x1;
+const bit<1>  INT_CONTINUE = 0x1;
+const bit<1>  INT_TEMINATE = 0x0;
 
 typedef bit<9>  egressSpec_t;
 
@@ -34,6 +34,13 @@ header ipv4_t {
     bit<32>   dstAddr;
 }
 
+header udp_t {
+    bit<16>   srcPort;
+    bit<16>   dstPort;
+    bit<16>   len;
+    bit<16>   cksum;
+}
+
 header inth_t {
     bit<2>    version;
     bit<1>    append;
@@ -55,6 +62,7 @@ struct metadata {
 struct headers {
     ethernet_t  ethernet;
     ipv4_t      ipv4;
+    udp_t       udp;
     inth_t      inth;
 }
 
@@ -80,6 +88,11 @@ parser MyParser(packet_in packet,
     }
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
+        transition parse_udp;
+    }
+
+    state parse_udp {
+        packet.extract(hdr.udp);
         transition accept;
     }
 
@@ -146,11 +159,28 @@ control MyIngress(inout headers hdr,
                   0,
                   0,
                   standard_metadata.ingress_port,
-                  standard_metadata.egress_port,
+                  standard_metadata.egress_spec,
                   standard_metadata.ingress_global_timestamp,
                   0, 
                   NODE_ID};
         hdr.inth = i;
+    }
+
+    table debug {
+        key = {
+            hdr.inth.version: exact;
+            hdr.inth.append: exact;
+            hdr.inth.following: exact;
+            hdr.inth.availCount: exact;
+            hdr.inth.rsvd: exact;
+            hdr.inth.ingressPort: exact;
+            hdr.inth.egressPort: exact;
+            hdr.inth.ingressTime: exact;
+            hdr.inth.nodeID: exact;
+        }
+        actions = {
+        }
+        size = 64;
     }
     
     apply {
@@ -159,6 +189,8 @@ control MyIngress(inout headers hdr,
             ipv4_routing.apply();
         }
         create_INT();
+
+        debug.apply();
     }
 }
 
@@ -175,8 +207,19 @@ control MyEgress(inout headers hdr,
         hdr.inth.setValid();
     }
 
+    table debug_egress {
+        key = {
+            hdr.inth.egressTime: exact;
+        }
+        actions = {
+        }
+        size = 64;
+    }
+
     apply { 
-        update_INT();        
+        update_INT();
+
+        debug_egress.apply();      
      }
 }
 
@@ -198,6 +241,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
 
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
+        packet.emit(hdr.udp);
         packet.emit(hdr.inth);
     }
 }
