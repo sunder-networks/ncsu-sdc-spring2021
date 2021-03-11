@@ -172,6 +172,7 @@ control MyEgress(inout headers hdr,
 
     action update_INT() {
         hdr.inth.egressTime = standard_metadata.egress_global_timestamp;
+        hdr.inth.setValid();
     }
 
     apply { 
