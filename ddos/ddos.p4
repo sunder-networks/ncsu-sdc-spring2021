@@ -35,18 +35,6 @@ header ipv4_t {
     bit<32> dstAddr;
 }
 
-header instrinsic_metadata_t {
-    bit<48> ingress_global_timestamp;
-    bit<48> egress_global_timestamp;
-    bit<16> mcast_grp;
-    bit<16> egress_rid;
-}
-
-header throttle_t {
-    bit<48> running_freq;
-    bit<8> do_drop;
-}
-
 /*************************************************************************
 *********************** S T R U C T S  ***********************************
 *************************************************************************/
@@ -59,19 +47,15 @@ struct freq_entry {
 }
 
 struct metadata {
-    instrinsic_metadata_t instrinsic_metadata;
+    bit<8> do_drop;
+    bit<48> freq;
+    bit<48> last_diff;
 }
 
 struct headers {
     ethernet_t   ethernet;
     ipv4_t   ipv4;
-    throttle_t throttle;
 }
-
-/*************************************************************************
-*********************** R E G I S T E R S  *******************************
-*************************************************************************/
-
 
 /*************************************************************************
 *********************** P A R S E R  ***********************************
@@ -117,8 +101,8 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
-    register<bit<48>>(1) global_freq_r;
-    register<bit<48>>(1) last_time_r;
+    register<bit<48>>(64) global_freq_r;
+    register<bit<48>>(64) last_time_r;
 
     action drop() {
         mark_to_drop(standard_metadata);
@@ -149,11 +133,10 @@ control MyIngress(inout headers hdr,
         This is a proof of concept for a more robust throttling and eventually DDOS
             detection algorithm.
     */
-    action throttle_packets(egressSpec_t p, bit<48> dmac) {
+    action throttle_packets(egressSpec_t p, bit<48> thresh) {
 
         // Standard forwarding
         standard_metadata.egress_spec = p;
-        hdr.ethernet.dstAddr = dmac;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
 
         // read timestamp off header
@@ -169,46 +152,64 @@ control MyIngress(inout headers hdr,
 
         // update running frequency and time registers
         time_diff = (current_time - last_time);
-        global_freq = (global_freq + 1);
+        global_freq = (global_freq + 2);
 
-        if(time_diff < 10){
-            global_freq = global_freq * 2;
-        } else if(time_diff < 100) {
-            global_freq = global_freq / 2;
-        } else if(time_diff < 1000) {
-            global_freq = global_freq / 4;
+        if(time_diff < 100){
+            global_freq = global_freq << 1;
+        } else if(time_diff < 1000){
+          //no-op
         } else if(time_diff < 10000) {
-            global_freq = global_freq / 8;
+            global_freq = global_freq >> 1;
         } else if(time_diff < 100000) {
-            global_freq = global_freq / 16;
+            global_freq = global_freq >> 2;
+        } else if(time_diff < 1000000) {
+            global_freq = global_freq >> 3;
+        } else if(time_diff < 10000000) {
+            global_freq = global_freq >> 4;
+        } else {
+            global_freq = global_freq >> 5;
         }
 
-        global_freq_r.write((bit<32>) global_freq, 0);
-        last_time_r.write((bit<32>)last_time, 0);
+        global_freq_r.write(0, global_freq);
+        last_time_r.write(0, current_time);
+
+        meta.last_diff = time_diff;
+        meta.freq = global_freq;
 
         // check if new frequency value is beyond threshold
-        if(global_freq > FREQ_DROP_THRESHOLD){
+        if(global_freq >= thresh){
             // if above threshold, mark packet for drop
-            hdr.throttle.do_drop = 1;
+            meta.do_drop = 1;
         }
 
     }
 
     table throttle {
         key = {
-            hdr.ipv4.srcAddr: lpm;
+            meta.do_drop: exact;
         }
         actions = {
             throttle_packets;
+            drop;
         }
         size = 1024;
     }
 
+    table drop_table {
+        key = {
+            meta.do_drop: exact;
+        }
+        actions = {
+            drop;
+        }
+    }
+
     table debug {
         key = {
+            meta.do_drop: exact;
+            meta.last_diff: exact;
+            meta.freq: exact;
             hdr.ipv4.srcAddr: exact;
-            hdr.throttle.running_freq: exact;
-            hdr.throttle.do_drop: exact;
         }
         actions = {
             drop;
@@ -218,8 +219,10 @@ control MyIngress(inout headers hdr,
 
     apply {
         my_ports.apply();
+        throttle.apply();
+        drop_table.apply();
         if (hdr.ipv4.isValid()){
-            throttle.apply();
+            //throttle.apply();
         }
         debug.apply();
     }
