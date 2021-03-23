@@ -1,5 +1,8 @@
 ## Populate tables
 
+Execute the following in the P4 Runtime Shell
+
+```
 te = table_entry["MyIngress.throttle"](action="MyIngress.throttle_packets")
 
 te.match['do_drop']="0"
@@ -15,5 +18,14 @@ te = table_entry["MyIngress.drop_table"](action="MyIngress.drop")
 te.match['do_drop']="1"
 
 te.insert()
+```
 
 ## Testing
+
+`docker exec -it p4switch tail -f /tmp/s1/stratum_bmv2.log`
+
+`make test`
+
+>> packet = Ether()/TCP()/IP()
+
+>> sendp(packet, iface='s1-eth1', count=1000)

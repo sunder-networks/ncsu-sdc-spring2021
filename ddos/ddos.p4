@@ -142,18 +142,26 @@ control MyIngress(inout headers hdr,
         // read timestamp off header
         bit<48> current_time = standard_metadata.ingress_global_timestamp;
 
-        // read global register values
+        // temp scope variables
         bit<48> global_freq;
         bit<48> last_time;
         bit<48> time_diff;
+        // keep track of old global state in case we need to revert
+        bit<48> old_time;
+        bit<48> old_freq;
 
+        // Read state from registers
         global_freq_r.read(global_freq, 0);
         last_time_r.read(last_time, 0);
+        global_freq_r.read(old_freq, 0);
+        last_time_r.read(old_time, 0);
 
         // update running frequency and time registers
         time_diff = (current_time - last_time);
         global_freq = (global_freq + 2);
 
+        // Approximation of division based on time difference
+        // TODO - improve this to be more adaptive so as to prevent runaway situations
         if(time_diff < 100){
             global_freq = global_freq << 1;
         } else if(time_diff < 1000){
@@ -170,17 +178,23 @@ control MyIngress(inout headers hdr,
             global_freq = global_freq >> 5;
         }
 
-        global_freq_r.write(0, global_freq);
-        last_time_r.write(0, current_time);
-
+        // Values are added to metadata for debug purposes
         meta.last_diff = time_diff;
         meta.freq = global_freq;
 
         // check if new frequency value is beyond threshold
         if(global_freq >= thresh){
-            // if above threshold, mark packet for drop
+            // if at or above threshold, mark packet for drop
             meta.do_drop = 1;
+
+            // if throttling has occurred, do not persist working state (use old values instead)
+            global_freq = old_freq;
+            current_time = old_time;
         }
+
+        // Persist state in registers
+        global_freq_r.write(0, global_freq);
+        last_time_r.write(0, current_time);
 
     }
 
