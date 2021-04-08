@@ -204,8 +204,8 @@ control MyIngress(inout headers hdr,
         }
         actions = {
             throttle_packets;
-            drop;
         }
+        default_action = throttle_packets(2,1000);
         size = 1024;
     }
 
