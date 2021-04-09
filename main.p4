@@ -2,12 +2,16 @@
 #include <core.p4>
 #include <v1model.p4>
 
+// #define SINK_MODE
+
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
 
 const bit<32> NODE_ID = 0xFACADEDA;
 const bit<16> TYPE_IPV4 = 0x0800;
+const bit<8>  IP_PROTOCOL_TYPE_UDP = 0x11;
+const bit<8>  IP_PROTOCOL_TYPE_TCP = 0x06;
 const bit<2>  TYPE_INT = 0x1;
 const bit<1>  INT_CONTINUE = 0x1;
 const bit<1>  INT_TEMINATE = 0x0;
@@ -64,6 +68,7 @@ struct headers {
     ipv4_t      ipv4;
     udp_t       udp;
     inth_t      inth;
+    inth_t      newinth;
 }
 
 /*************************************************************************
@@ -78,7 +83,6 @@ parser MyParser(packet_in packet,
     state start {
         transition parse_ethernet;
     }
-
     state parse_ethernet {
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
@@ -88,12 +92,25 @@ parser MyParser(packet_in packet,
     }
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
-        transition parse_udp;
+        transition select(hdr.ipv4.protocol) {
+            IP_PROTOCOL_TYPE_UDP: parse_udp;
+            default: accept;
+        }
     }
-
     state parse_udp {
         packet.extract(hdr.udp);
-        transition accept;
+        transition select(hdr.udp.dstPort) {
+            default: parse_int;
+        }
+    }
+    state parse_int {
+        packet.extract(hdr.inth);
+        transition select(hdr.inth.following) {
+#ifdef SINK_MODE
+            INT_CONTINUE: parse_int;
+#endif
+            default: accept;
+        }
     }
 
 
@@ -133,8 +150,13 @@ control MyIngress(inout headers hdr,
             set_output;
             drop;
         }
-        size = 64;
+        // size = 64;
+        const entries = {
+            (9w1) : set_output(9w2);
+            (9w2) : set_output(9w1);
+        }
     }
+
     action ipv4_forward(egressSpec_t p, bit<48> dmac) {
         standard_metadata.egress_spec = p;
         hdr.ethernet.dstAddr = dmac;
@@ -154,7 +176,7 @@ control MyIngress(inout headers hdr,
 
     action create_INT() {
         inth_t i = {TYPE_INT,
-                  INT_TEMINATE,
+                  INT_CONTINUE,
                   INT_TEMINATE, 
                   0,
                   0,
@@ -163,20 +185,23 @@ control MyIngress(inout headers hdr,
                   standard_metadata.ingress_global_timestamp,
                   0, 
                   NODE_ID};
-        hdr.inth = i;
+        if(hdr.inth.isValid()) {
+            i.following = INT_CONTINUE;
+        }
+        hdr.newinth = i;
     }
 
     table debug {
         key = {
-            hdr.inth.version: exact;
-            hdr.inth.append: exact;
-            hdr.inth.following: exact;
-            hdr.inth.availCount: exact;
-            hdr.inth.rsvd: exact;
-            hdr.inth.ingressPort: exact;
-            hdr.inth.egressPort: exact;
-            hdr.inth.ingressTime: exact;
-            hdr.inth.nodeID: exact;
+            hdr.newinth.version: exact;
+            hdr.newinth.append: exact;
+            hdr.newinth.following: exact;
+            hdr.newinth.availCount: exact;
+            hdr.newinth.rsvd: exact;
+            hdr.newinth.ingressPort: exact;
+            hdr.newinth.egressPort: exact;
+            hdr.newinth.ingressTime: exact;
+            hdr.newinth.nodeID: exact;
         }
         actions = {
         }
@@ -188,7 +213,11 @@ control MyIngress(inout headers hdr,
         if (hdr.ipv4.isValid()){
             ipv4_routing.apply();
         }
-        create_INT();
+#ifndef SINK_MODE
+        if (!hdr.inth.isValid() || hdr.inth.append == INT_CONTINUE) {
+            create_INT();
+        }
+#endif
 
         debug.apply();
     }
@@ -203,13 +232,13 @@ control MyEgress(inout headers hdr,
                  inout standard_metadata_t standard_metadata) {
 
     action update_INT() {
-        hdr.inth.egressTime = standard_metadata.egress_global_timestamp;
-        hdr.inth.setValid();
+        hdr.newinth.egressTime = standard_metadata.egress_global_timestamp;
+        hdr.newinth.setValid();
     }
 
     table debug_egress {
         key = {
-            hdr.inth.egressTime: exact;
+            hdr.newinth.egressTime: exact;
         }
         actions = {
         }
@@ -217,7 +246,11 @@ control MyEgress(inout headers hdr,
     }
 
     apply { 
-        update_INT();
+#ifndef SINK_MODE
+        if (!hdr.inth.isValid() || hdr.inth.append == INT_CONTINUE) {
+            update_INT();
+        }
+#endif
 
         debug_egress.apply();      
      }
@@ -242,7 +275,10 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
         packet.emit(hdr.udp);
+#ifndef SINK_MODE
+        packet.emit(hdr.newinth);
         packet.emit(hdr.inth);
+#endif
     }
 }
 

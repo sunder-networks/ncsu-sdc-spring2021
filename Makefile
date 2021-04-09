@@ -7,10 +7,11 @@ MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
 # Docker images
-COMPILER_IMAGE := opennetworking/p4c@sha256:bbc894835ad2057373fca9a5ba92a28c891328a39a88848a35aba44f7f3a7cda
-MININET_IMAGE := gcr.io/hotbox-sunos/mn@sha256:f849ad2d24ad6e176e4f0b268163d3ff1198a62c7b18381ddb224fd609585dc4
-MININET_DEBUG_IMAGE := gcr.io/hotbox-sunos/mn@sha256:92eb52a35fa7a9e5ab8f2f5c22c59d37de4ec3b235a3c6fc8bfd150dd696121c
-SCAPY_IMAGE := ehlers/scapy@sha256:24527af82bde12bcd2fbeffe1ca8859300419d336ed717e41688235e64f14069
+# COMPILER_IMAGE := opennetworking/p4c@sha256:bbc894835ad2057373fca9a5ba92a28c891328a39a88848a35aba44f7f3a7cda
+COMPILER_IMAGE := p4lang/p4c:stable
+MININET_IMAGE := gcr.io/hotbox-sunos/mn@sha256:1ba5430f6fdfcf8e45893b4dd30e3757e68c8d3e242b5214833abc62d40dcbd4
+MININET_DEBUG_IMAGE := gcr.io/hotbox-sunos/mn@sha256:f04cd7eb7ca1e5e6928261c7589a820d076cde2352a82e74cbf848758962c244
+SCAPY_IMAGE := gcr.io/hotbox-sunos/scapy@sha256:c501873575bac0049a42b02496e760318404ea31821d663cea210035d3d590b3
 # Source helper
 P4_SRC := $(wildcard *.p4)
 
@@ -20,9 +21,10 @@ TOPO = single
 #   single
 #   linear,#Switches,#hosts
 #   tree,#Switches,#hosts
-LOG = warn
+LOG = debug
 # possible values are
 #   debug
+#   warn
 # USER VARIABLES ***************
 
 start: clean build
@@ -40,7 +42,7 @@ build/bmv2/p4info.pb.txt: $(P4_SRC)
 	@[ -d build/bmv2 ] || mkdir -p build/bmv2
 	docker run -it --rm -w /src -v ${PWD}:/src \
 	   ${COMPILER_IMAGE} \
-	   p4c-bm2-ss --arch v1model -o /src/$(@D)/bmv2.json  --p4runtime-files /src/$@ ${P4_SRC}
+	   p4c-bm2-ss --arch v1model -o /src/$(@D)/bmv2.json --p4runtime-files /src/$@ ${P4_SRC}
 	@echo "Compiled Successfully!"
 	@echo "pipeline data written to: $(@D)"
 
