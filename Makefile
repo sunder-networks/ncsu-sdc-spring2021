@@ -7,8 +7,7 @@ MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
 # Docker images
-# COMPILER_IMAGE := opennetworking/p4c@sha256:bbc894835ad2057373fca9a5ba92a28c891328a39a88848a35aba44f7f3a7cda
-COMPILER_IMAGE := p4lang/p4c:stable
+COMPILER_IMAGE := p4lang/p4c@sha256:0d71bf89866409148ce06ee90eb1630547ade68fffa62d1af626d33b9f64bebe
 MININET_IMAGE := gcr.io/hotbox-sunos/mn@sha256:1ba5430f6fdfcf8e45893b4dd30e3757e68c8d3e242b5214833abc62d40dcbd4
 MININET_DEBUG_IMAGE := gcr.io/hotbox-sunos/mn@sha256:f04cd7eb7ca1e5e6928261c7589a820d076cde2352a82e74cbf848758962c244
 SCAPY_IMAGE := gcr.io/hotbox-sunos/scapy@sha256:c501873575bac0049a42b02496e760318404ea31821d663cea210035d3d590b3

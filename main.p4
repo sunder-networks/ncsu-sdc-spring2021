@@ -15,6 +15,7 @@ const bit<8>  IP_PROTOCOL_TYPE_TCP = 0x06;
 const bit<2>  TYPE_INT = 0x1;
 const bit<1>  INT_CONTINUE = 0x1;
 const bit<1>  INT_TEMINATE = 0x0;
+const bit<8>  INT_REP_NO_LIM = 0xFF;
 
 typedef bit<9>  egressSpec_t;
 
@@ -49,8 +50,8 @@ header inth_t {
     bit<2>    version;
     bit<1>    append;
     bit<1>    following;
-    bit<4>    availCount;
-    bit<6>    rsvd;
+    bit<8>    availCount;
+    bit<2>    rsvd;
     bit<9>    ingressPort;
     bit<9>    egressPort;
     bit<48>   ingressTime;
@@ -178,7 +179,7 @@ control MyIngress(inout headers hdr,
         inth_t i = {TYPE_INT,
                   INT_CONTINUE,
                   INT_TEMINATE, 
-                  0,
+                  INT_REP_NO_LIM,
                   0,
                   standard_metadata.ingress_port,
                   standard_metadata.egress_spec,
@@ -187,6 +188,9 @@ control MyIngress(inout headers hdr,
                   NODE_ID};
         if(hdr.inth.isValid()) {
             i.following = INT_CONTINUE;
+            if(hdr.inth.availCount != INT_REP_NO_LIM) {
+                i.availCount = hdr.inth.availCount - 1;
+            }
         }
         hdr.newinth = i;
     }
@@ -214,7 +218,7 @@ control MyIngress(inout headers hdr,
             ipv4_routing.apply();
         }
 #ifndef SINK_MODE
-        if (!hdr.inth.isValid() || hdr.inth.append == INT_CONTINUE) {
+        if (!hdr.inth.isValid() || (hdr.inth.append == INT_CONTINUE && hdr.inth.availCount != 0)) {
             create_INT();
         }
 #endif
