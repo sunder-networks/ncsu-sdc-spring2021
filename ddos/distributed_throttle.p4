@@ -87,8 +87,8 @@ struct freq_entry {
 
 struct metadata {
     bit<8> do_drop;
-    bit<48> freq;
-    bit<48> last_diff;
+    bit<32> freq;
+    bit<32> last_diff;
 
     bit<32> register_position_one;
     bit<32> register_position_two;
@@ -96,11 +96,12 @@ struct metadata {
     bit<32> register_count_two;
     bit<32> register_freq_one;
     bit<32> register_freq_two;
-    bit<32> register_diff_one;
-    bit<32> register_diff_two;
+    bit<32> register_time_one;
+    bit<32> register_time_two;
 
     bit<32> flow_freq;
-    bit<32> flow_diff;
+    bit<32> flow_time;
+    bit<8> entry_exists;
 }
 
 struct headers {
@@ -167,14 +168,10 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
-    register<bit<48>>(NUM_CELLS) global_freq_r;
-    register<bit<48>>(NUM_CELLS) last_time_r;
-    register<bit<32>>(NUM_CELLS) dest_ip_r;
-
     // Elements that make up our Invertible Bloom Lookup Table (IBLT)
     register<bit<BLOOM_FILTER_BIT_WIDTH>>(BLOOM_FILTER_ENTRIES) bloom_count;
     register<bit<BLOOM_FILTER_BIT_WIDTH>>(BLOOM_FILTER_ENTRIES) bloom_freq;
-    register<bit<BLOOM_FILTER_BIT_WIDTH>>(BLOOM_FILTER_ENTRIES) bloom_diff;
+    register<bit<BLOOM_FILTER_BIT_WIDTH>>(BLOOM_FILTER_ENTRIES) bloom_time;
 
     action drop() {
         mark_to_drop(standard_metadata);
@@ -220,25 +217,52 @@ control MyIngress(inout headers hdr,
        bloom_count.read(meta.register_count_one, meta.register_position_one);
        bloom_count.read(meta.register_count_two, meta.register_position_two);
        // read time differences
-       bloom_diff.read(meta.register_diff_one, meta.register_position_one);
-       bloom_diff.read(meta.register_diff_two, meta.register_position_two);
+       bloom_time.read(meta.register_time_one, meta.register_position_one);
+       bloom_time.read(meta.register_time_two, meta.register_position_two);
        // read running frequencies
        bloom_freq.read(meta.register_freq_one, meta.register_position_one);
        bloom_freq.read(meta.register_freq_two, meta.register_position_two);
 
+       // pre-set values
+       meta.entry_exists = 1;
+       meta.flow_time = 0;
+       meta.flow_freq = 0;
+
        // At least one entry must have a count of 1 to give us valid data
-       if(meta.register_count_one == 1){
-           meta.flow_diff = meta.register_diff_one;
+       if(meta.register_count_one == 0 || meta.register_count_two == 0){
+           meta.entry_exists = 0;
+       }
+       else if(meta.register_count_one == 1){
+           meta.flow_time = meta.register_time_one;
            meta.flow_freq = meta.register_freq_one;
        }
        else if(meta.register_count_two == 1){
-           meta.flow_diff = meta.register_diff_two;
+           meta.flow_time = meta.register_time_two;
            meta.flow_freq = meta.register_freq_two;
        }
+
+       // temporarily remove the entries (to be added back in the update)
+      bloom_count.write(meta.register_position_one, meta.register_count_one - (bit<32>) meta.entry_exists);
+      bloom_count.write(meta.register_position_two, meta.register_count_two - (bit<32>) meta.entry_exists);
+
+      bloom_time.write(meta.register_position_one, meta.register_time_one - meta.flow_time);
+      bloom_time.write(meta.register_position_two, meta.register_time_two - meta.flow_time);
+
+      bloom_freq.write(meta.register_position_one, meta.register_freq_one - meta.flow_freq);
+      bloom_freq.write(meta.register_position_two, meta.register_freq_two - meta.flow_freq);
+
+      // now, we mark that the entry exists (whether it was new or not, so that we can see if it is valid in later steps)
+      meta.entry_exists = 1;
+      if(meta.register_count_one > 1 && meta.register_count_two > 1){
+          // if both slots were filled, we should make a note that these registers are not valid
+          // the entry_exists flag gets repurposed as a valid indicator
+          meta.entry_exists = 0;
+      }
 
     }
 
     action update_flow_info(){
+
         // First hash of bloom filter using crc16 - hash the flow's 5-tuple
         hash(meta.register_position_one, HashAlgorithm.crc16, (bit<32>)0, {hdr.ipv4.srcAddr,
                                                      hdr.ipv4.dstAddr,
@@ -254,45 +278,49 @@ control MyIngress(inout headers hdr,
                                                      hdr.ipv4.protocol},
                                                      (bit<32>)BLOOM_FILTER_ENTRIES);
        //set bloom filter fields
-       //bloom_count.write(meta.register_position_one, 1);
-       //bloom_count.write(meta.register_position_two, 1);
+       bloom_count.write(meta.register_position_one, 1);
+       bloom_count.write(meta.register_position_two, 1);
 
-       //Read bloom filter cells to check if there are 1's
-       //bloom_count.read(meta.register_cell_one, meta.register_position_one);
-       //bloom_count.read(meta.register_cell_two, meta.register_position_two);
+       // Whether its new or not, we always need to add back the entry, so this is valid!
+       bloom_count.write(meta.register_position_one, meta.register_count_one + 1);
+       bloom_count.write(meta.register_position_two, meta.register_count_two + 1);
+
+       bloom_time.write(meta.register_position_one, meta.register_time_one);
+       bloom_time.write(meta.register_position_two, meta.register_time_two);
+
+       bloom_freq.write(meta.register_position_one, meta.register_freq_one);
+       bloom_freq.write(meta.register_position_two, meta.register_freq_two);
     }
 
     /*
-        Work In Progress - there are elements of this that don't work yet!
-
         Updates global frequency and time values for ALL incoming packets and drops packets
             while frequency is above predefined threshold
 
         This is a proof of concept for a more robust throttling and eventually DDOS
             detection algorithm.
     */
-    action throttle_packets(egressSpec_t p, bit<48> thresh) {
+    action throttle_packets(egressSpec_t p, bit<32> thresh) {
 
         // Standard forwarding
         standard_metadata.egress_spec = p;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
 
         // read timestamp off header
-        bit<48> current_time = standard_metadata.ingress_global_timestamp;
+        bit<32> current_time = (bit<32>) standard_metadata.ingress_global_timestamp;
 
         // temp scope variables
-        bit<48> global_freq;
-        bit<48> last_time;
-        bit<48> time_diff;
+        bit<32> global_freq;
+        bit<32> last_time;
+        bit<32> time_diff;
         // keep track of old global state in case we need to revert
-        bit<48> old_time;
-        bit<48> old_freq;
+        bit<32> old_time;
+        bit<32> old_freq;
 
         // Read state from registers
-        global_freq_r.read(global_freq, 0);
-        last_time_r.read(last_time, 0);
-        global_freq_r.read(old_freq, 0);
-        last_time_r.read(old_time, 0);
+        global_freq = meta.flow_freq;
+        last_time = meta.flow_time;
+        old_freq = meta.flow_freq;
+        old_time = meta.flow_time;
 
         // update running frequency and time registers
         time_diff = (current_time - last_time);
@@ -331,8 +359,8 @@ control MyIngress(inout headers hdr,
         }
 
         // Persist state in registers
-        global_freq_r.write(0, global_freq);
-        last_time_r.write(0, current_time);
+        meta.flow_freq = global_freq;
+        meta.flow_time = current_time;
 
     }
 
@@ -354,6 +382,9 @@ control MyIngress(inout headers hdr,
         actions = {
             drop;
         }
+        const entries = {
+            (8w1): drop();
+        }
     }
 
     table debug {
@@ -371,10 +402,11 @@ control MyIngress(inout headers hdr,
 
     apply {
         my_ports.apply();
-        throttle.apply();
-        drop_table.apply();
         if (hdr.ipv4.isValid()){
-            get_flow_info();
+             get_flow_info();
+             throttle.apply();
+             drop_table.apply();
+             update_flow_info();
         }
         debug.apply();
     }
