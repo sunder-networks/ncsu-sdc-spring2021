@@ -26,6 +26,6 @@ te.insert()
 
 `make test`
 
->> packet = Ether()/TCP()/IP()
+>> packet = Ether()/IP()/TCP()
 
 >> sendp(packet, iface='s1-eth1', count=1000)
