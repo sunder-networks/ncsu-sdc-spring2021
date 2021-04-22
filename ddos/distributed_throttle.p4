@@ -23,6 +23,7 @@ const bit<16> TYPE_IPV6 = 0x86DD;
 const bit<16> TYPE_FEED = 0xFEED;
 const bit<8>  TYPE_TCP  = 6;
 const bit<8>  TYPE_UDP  = 17;
+const bit<8>  TYPE_ICMP = 1;
 
 typedef bit<9>  egressSpec_t;
 
@@ -45,6 +46,11 @@ header ipv4_t {
     bit<16>   hdrChecksum;
     bit<32> srcAddr;
     bit<32> dstAddr;
+}
+
+header icmp_t {
+    bit<16> typeCode;
+    bit<16> hdrChecksum;
 }
 
 header tcp_t{
@@ -109,6 +115,7 @@ struct headers {
     ipv4_t   ipv4;
     tcp_t   tcp;
     udp_t   udp;
+    icmp_t icmp;
 }
 
 /*************************************************************************
@@ -137,6 +144,7 @@ parser MyParser(packet_in packet,
         transition select(hdr.ipv4.protocol) {
             TYPE_TCP: parse_tcp;
             TYPE_UDP: parse_udp;
+            TYPE_ICMP: parse_icmp;
             default: accept;
         }
     }
@@ -147,6 +155,11 @@ parser MyParser(packet_in packet,
     }
     state parse_udp {
         packet.extract(hdr.udp);
+        transition accept;
+    }
+    state parse_icmp {
+        packet.extract(hdr.icmp);
+        meta.do_drop = 1;
         transition accept;
     }
 
@@ -241,9 +254,9 @@ control MyIngress(inout headers hdr,
            meta.flow_freq = meta.register_freq_two;
        }
 
-       // temporarily remove the entries (to be added back in the update)
-      bloom_count.write(meta.register_position_one, meta.register_count_one - (bit<48>) meta.entry_exists);
-      bloom_count.write(meta.register_position_two, meta.register_count_two - (bit<48>) meta.entry_exists);
+      // track the ( total - entry ) values before entry was modified (to be added back later)
+      meta.register_count_one = meta.register_count_one - (bit<48>) meta.entry_exists;
+      meta.register_count_two = meta.register_count_two - (bit<48>) meta.entry_exists;
 
       meta.register_time_one = meta.register_time_one - meta.flow_time;
       meta.register_time_two = meta.register_time_two - meta.flow_time;
@@ -260,12 +273,17 @@ control MyIngress(inout headers hdr,
       }
 
       // If either of them are a valid hit, set them to zero so that the dec is cancelled out
-      if(meta.register_count_one == 1){
-          meta.register_count_one = 0;
-      }
-      if(meta.register_count_two == 1){
-          meta.register_count_two = 0;
-      }
+      // if(meta.register_count_one == 1){
+      //     meta.register_count_one = 0;
+      // }
+      // if(meta.register_count_two == 1){
+      //     meta.register_count_two = 0;
+      // }
+
+      //TODO add in cleanup code here
+      // if both slots are filled, but their time diff is really large OR their freq is 0
+      // NOTE: both slots must have the same values
+      // Wipe them away, reset their count, and use the slots
 
     }
 
@@ -286,7 +304,7 @@ control MyIngress(inout headers hdr,
                                                      hdr.ipv4.protocol},
                                                      (bit<48>)BLOOM_FILTER_ENTRIES);
 
-       // Whether its new or not, we always need to add back the entry, so this is valid!
+       // Whether its new or not, we always need to add back the entry and what was there without the entry
        bloom_count.write(meta.register_position_one, meta.register_count_one + (bit<48>)meta.entry_exists);
        bloom_count.write(meta.register_position_two, meta.register_count_two + (bit<48>)meta.entry_exists);
 
