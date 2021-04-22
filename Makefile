@@ -46,7 +46,7 @@ build/bmv2/p4info.pb.txt: $(P4_SRC)
 	@echo "pipeline data written to: $(@D)"
 
 test: build
-	@docker run -it --rm --net=container:p4switch ${SCAPY_IMAGE} bash
+	@docker run -it -v ${PWD}:/src -w /src --rm --net=container:p4switch ${SCAPY_IMAGE} bash
 clean:
 	@rm -rf build
 
