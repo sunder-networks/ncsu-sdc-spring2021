@@ -20,13 +20,11 @@ class INTP(Packet):
         return INTP
 
 def test():
-    bind_layers(UDP, INTP, dport=11065 )
-
     ain = AsyncSniffer(iface="s1-eth1")
     aout = AsyncSniffer(iface="s1-eth2")
     ain.start()
     aout.start()
-    sendp(Ether()/IP()/UDP(dport=11065), iface="s1-eth1")
+    sendp(Ether()/IP()/UDP(), iface="s1-eth1")
     
     # To stop the sniffer and show summary
     time.sleep(1)
@@ -35,7 +33,12 @@ def test():
     print("!~! Input !~!")
     ain.results[0].show()
     print("!~! Output !~!")
-    aout.results[0].show()
+    # aout.results[0].show()
+    if len(aout.results) > 0:
+        rxPkt = aout.results[0]
+        # import pdb; pdb.Pdb().set_trace()
+        print(rxPkt[UDP].decode_payload_as(INTP))
+        rxPkt.show()
 
 
 if __name__=="__main__":
