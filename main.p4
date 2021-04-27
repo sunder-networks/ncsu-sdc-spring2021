@@ -105,6 +105,10 @@ control MyIngress(inout headers hdr,
             drop;
         }
         size = 64;
+        const entries = {
+            (9w1) : set_output(9w2);
+            (9w2) : set_output(9w1);
+        }
     }
     action ipv4_forward(egressSpec_t p, bit<48> dmac) {
         standard_metadata.egress_spec = p;

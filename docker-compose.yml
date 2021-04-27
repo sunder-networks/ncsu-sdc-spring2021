@@ -1,0 +1,36 @@
+
+# docker run -d -p 50000-50030:50000-50030 -p 3000:3000 --name=influxdb quay.io/influxdb/influxdb:1.6-alpine
+# docker run -d --net=container:influxdb  --name grafana grafana/grafana:6.5.0
+# # grafana dashboard: 12751
+# docker run -d --name=telegraf  --net=container:influxdb -v $PWD/telegraf.conf:/etc/telegraf/telegraf.conf:ro telegraf
+# @exec docker run -it  -p 50000-50030:50000-50030 --rm --privileged --name p4switch ${MININET_DEBUG_IMAGE} --topo ${TOPO}
+version: "3"
+services:
+  influxdb:
+    image: quay.io/influxdb/influxdb:1.6-alpine
+    ports:
+        - "8086:8086"
+    networks:
+      mynet: {}
+  grafana:
+    image: grafana/grafana:6.5.0
+    ports:
+        - "3000:3000"
+    networks:
+      mynet: {}
+  telegraf:
+    image: telegraf
+    network_mode: service:p4switch
+    volumes:
+        - ${PWD}/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+  p4switch:
+    image: gcr.io/hotbox-sunos/mn@sha256:f04cd7eb7ca1e5e6928261c7589a820d076cde2352a82e74cbf848758962c244
+    tty: true
+    privileged: true
+    ports:
+        - "50000-50030:50000-50030"
+    networks:
+      mynet: {}
+
+networks:
+  mynet: {}
