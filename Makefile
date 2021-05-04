@@ -20,10 +20,9 @@ TOPO = single
 #   single
 #   linear,#Switches,#hosts
 #   tree,#Switches,#hosts
-LOG = debug
+LOG = warn
 # possible values are
 #   debug
-#   warn
 # USER VARIABLES ***************
 
 start: clean build
@@ -41,17 +40,17 @@ build/bmv2/p4info.pb.txt: $(P4_SRC)
 	@[ -d build/bmv2 ] || mkdir -p build/bmv2
 	docker run -it --rm -w /src -v ${PWD}:/src \
 	   ${COMPILER_IMAGE} \
-	   p4c-bm2-ss --arch v1model -o /src/$(@D)/bmv2.json --p4runtime-files /src/$@ ${P4_SRC}
+	   p4c-bm2-ss --arch v1model -o /src/$(@D)/bmv2.json  --p4runtime-files /src/$@ ${P4_SRC}
 	@echo "Compiled Successfully!"
 	@echo "pipeline data written to: $(@D)"
 
 test: build
-	@docker run -it -v ${PWD}:/src -w /src --rm --net=container:p4switch ${SCAPY_IMAGE} bash
+	@docker run -it --rm --net=container:main_p4switch_1 ${SCAPY_IMAGE} scapy
 clean:
 	@rm -rf build
 
 TARGET_PORT=50001
 set-pipeline: build/bmv2/p4info.pb.txt
-	@docker run -it --rm -v ${PWD}/build/bmv2:/p4 -w /p4 --net=container:p4switch p4lang/p4runtime-sh --grpc-addr 127.0.0.1:${TARGET_PORT} --device-id 1 --election 0,1 --config /p4/p4info.pb.txt,/p4/bmv2.json
+	@docker run -it --rm -v ${PWD}/build/bmv2:/p4 -w /p4 --net=container:main_p4switch_1 p4lang/p4runtime-sh --grpc-addr 127.0.0.1:${TARGET_PORT} --device-id 1 --election 0,1 --config /p4/p4info.pb.txt,/p4/bmv2.json
 
 .PHONY: build clean test start

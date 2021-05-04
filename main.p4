@@ -2,20 +2,13 @@
 #include <core.p4>
 #include <v1model.p4>
 
-// #define SINK_MODE
-
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
 
-const bit<32> NODE_ID = 0xFACADEDA;
 const bit<16> TYPE_IPV4 = 0x0800;
-const bit<8>  IP_PROTOCOL_TYPE_UDP = 0x11;
-const bit<8>  IP_PROTOCOL_TYPE_TCP = 0x06;
-const bit<2>  TYPE_INT = 0x1;
-const bit<1>  INT_CONTINUE = 0x1;
-const bit<1>  INT_TEMINATE = 0x0;
-const bit<8>  INT_REP_NO_LIM = 0xFF;
+const bit<16> TYPE_IPV6 = 0x86DD;
+const bit<16> TYPE_FEED = 0xFEED;
 
 typedef bit<9>  egressSpec_t;
 
@@ -35,28 +28,8 @@ header ipv4_t {
     bit<8>    ttl;
     bit<8>    protocol;
     bit<16>   hdrChecksum;
-    bit<32>   srcAddr;
-    bit<32>   dstAddr;
-}
-
-header udp_t {
-    bit<16>   srcPort;
-    bit<16>   dstPort;
-    bit<16>   len;
-    bit<16>   cksum;
-}
-
-header inth_t {
-    bit<2>    version;
-    bit<1>    append;
-    bit<1>    following;
-    bit<8>    availCount;
-    bit<2>    rsvd;
-    bit<9>    ingressPort;
-    bit<9>    egressPort;
-    bit<48>   ingressTime;
-    bit<48>   egressTime;
-    bit<32>   nodeID;
+    bit<32> srcAddr;
+    bit<32> dstAddr;
 }
 
 
@@ -65,11 +38,8 @@ struct metadata {
 }
 
 struct headers {
-    ethernet_t  ethernet;
-    ipv4_t      ipv4;
-    udp_t       udp;
-    inth_t      inth;
-    inth_t      newinth;
+    ethernet_t   ethernet;
+    ipv4_t   ipv4;
 }
 
 /*************************************************************************
@@ -84,34 +54,18 @@ parser MyParser(packet_in packet,
     state start {
         transition parse_ethernet;
     }
+
     state parse_ethernet {
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4: parse_ipv4;
+            // TYPE_IPV6: parse_ipv6;
             default: accept;
         }
     }
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
-        transition select(hdr.ipv4.protocol) {
-            IP_PROTOCOL_TYPE_UDP: parse_udp;
-            default: accept;
-        }
-    }
-    state parse_udp {
-        packet.extract(hdr.udp);
-        transition select(hdr.udp.dstPort) {
-            default: parse_int;
-        }
-    }
-    state parse_int {
-        packet.extract(hdr.inth);
-        transition select(hdr.inth.following) {
-#ifdef SINK_MODE
-            INT_CONTINUE: parse_int;
-#endif
-            default: accept;
-        }
+        transition accept;
     }
 
 
@@ -134,7 +88,6 @@ control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
 control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
-    
     action drop() {
         mark_to_drop(standard_metadata);
     }
@@ -151,13 +104,12 @@ control MyIngress(inout headers hdr,
             set_output;
             drop;
         }
-        // size = 64;
+        size = 64;
         const entries = {
             (9w1) : set_output(9w2);
             (9w2) : set_output(9w1);
         }
     }
-
     action ipv4_forward(egressSpec_t p, bit<48> dmac) {
         standard_metadata.egress_spec = p;
         hdr.ethernet.dstAddr = dmac;
@@ -175,39 +127,28 @@ control MyIngress(inout headers hdr,
         size = 1024;
     }
 
-    action create_INT() {
-        inth_t i = {TYPE_INT,
-                  INT_CONTINUE,
-                  INT_TEMINATE, 
-                  INT_REP_NO_LIM,
-                  0,
-                  standard_metadata.ingress_port,
-                  standard_metadata.egress_spec,
-                  standard_metadata.ingress_global_timestamp,
-                  0, 
-                  NODE_ID};
-        if(hdr.inth.isValid()) {
-            i.following = INT_CONTINUE;
-            if(hdr.inth.availCount != INT_REP_NO_LIM) {
-                i.availCount = hdr.inth.availCount - 1;
-            }
-        }
-        hdr.newinth = i;
-    }
-
     table debug {
         key = {
-            hdr.newinth.version: exact;
-            hdr.newinth.append: exact;
-            hdr.newinth.following: exact;
-            hdr.newinth.availCount: exact;
-            hdr.newinth.rsvd: exact;
-            hdr.newinth.ingressPort: exact;
-            hdr.newinth.egressPort: exact;
-            hdr.newinth.ingressTime: exact;
-            hdr.newinth.nodeID: exact;
+            standard_metadata.ingress_port: exact;
+            hdr.ethernet.dstAddr: exact;
+            hdr.ethernet.srcAddr: exact;
+            hdr.ipv4.ttl : exact;
+            hdr.ipv4.version: exact;
+            hdr.ipv4.ihl: exact;
+            hdr.ipv4.diffserv: exact;
+            hdr.ipv4.totalLen: exact;
+            hdr.ipv4.identification: exact;
+            hdr.ipv4.flags: exact;
+            hdr.ipv4.fragOffset: exact;
+            hdr.ipv4.ttl: exact;
+            hdr.ipv4.protocol: exact;
+            hdr.ipv4.hdrChecksum: exact;
+            hdr.ipv4.srcAddr: exact;
+            hdr.ipv4.dstAddr: exact;
         }
         actions = {
+            set_output;
+            drop;
         }
         size = 64;
     }
@@ -217,12 +158,6 @@ control MyIngress(inout headers hdr,
         if (hdr.ipv4.isValid()){
             ipv4_routing.apply();
         }
-#ifndef SINK_MODE
-        if (!hdr.inth.isValid() || (hdr.inth.append == INT_CONTINUE && hdr.inth.availCount != 0)) {
-            create_INT();
-        }
-#endif
-
         debug.apply();
     }
 }
@@ -234,30 +169,13 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-
-    action update_INT() {
-        hdr.newinth.egressTime = standard_metadata.egress_global_timestamp;
-        hdr.newinth.setValid();
-    }
-
-    table debug_egress {
-        key = {
-            hdr.newinth.egressTime: exact;
-        }
-        actions = {
-        }
-        size = 64;
-    }
-
-    apply { 
-#ifndef SINK_MODE
-        if (!hdr.inth.isValid() || hdr.inth.append == INT_CONTINUE) {
-            update_INT();
-        }
-#endif
-
-        debug_egress.apply();      
-     }
+    /*
+       The egress_port of a packet MUST be selected during INGRESS processing, 
+       and egress processing is NOT allowed to change it.
+        
+        https://p4.org/p4-spec/docs/PSA-v1.1.0.html#appendix-rationale-egress
+    */
+    apply {  }
 }
 
 /*************************************************************************
@@ -278,11 +196,6 @@ control MyDeparser(packet_out packet, in headers hdr) {
 
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
-        packet.emit(hdr.udp);
-#ifndef SINK_MODE
-        packet.emit(hdr.newinth);
-        packet.emit(hdr.inth);
-#endif
     }
 }
 
