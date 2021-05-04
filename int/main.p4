@@ -251,7 +251,7 @@ control MyEgress(inout headers hdr,
 
     apply { 
 #ifndef SINK_MODE
-        if (!hdr.inth.isValid() || hdr.inth.append == INT_CONTINUE) {
+        if (!hdr.inth.isValid() || (hdr.inth.append == INT_CONTINUE && hdr.inth.availCount != 0)) {
             update_INT();
         }
 #endif
