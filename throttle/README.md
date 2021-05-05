@@ -13,6 +13,8 @@ Before setup, ensure you have docker and make installed.
 
 ## Populate tables
 
+`make set-pipeline`
+
 Execute the following in the P4 Runtime Shell:
 
 ```
