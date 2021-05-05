@@ -10,7 +10,7 @@
 
 #define NUM_CELLS 100
 
-#define BLOOM_FILTER_ENTRIES 4096
+#define BLOOM_FILTER_ENTRIES 2048
 #define BLOOM_FILTER_BIT_WIDTH 48
 
 
@@ -20,7 +20,6 @@
 
 const bit<16> TYPE_IPV4 = 0x0800;
 const bit<16> TYPE_IPV6 = 0x86DD;
-const bit<16> TYPE_FEED = 0xFEED;
 const bit<8>  TYPE_TCP  = 6;
 const bit<8>  TYPE_UDP  = 17;
 const bit<8>  TYPE_ICMP = 1;
@@ -83,13 +82,6 @@ header udp_t {
 /*************************************************************************
 *********************** S T R U C T S  ***********************************
 *************************************************************************/
-
-struct freq_entry {
-    bit<32> srcAddr;
-    bit<32> dstAddr;
-    bit<32> freq;
-    bit<48> ingress_time;
-}
 
 struct metadata {
     bit<8> do_drop;
@@ -157,6 +149,8 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.udp);
         transition accept;
     }
+
+    // Automatically drop ICMP packets to prevent ICMP floods
     state parse_icmp {
         packet.extract(hdr.icmp);
         meta.do_drop = 1;
@@ -272,18 +266,25 @@ control MyIngress(inout headers hdr,
           meta.entry_exists = 0;
       }
 
-      // If either of them are a valid hit, set them to zero so that the dec is cancelled out
-      // if(meta.register_count_one == 1){
-      //     meta.register_count_one = 0;
-      // }
-      // if(meta.register_count_two == 1){
-      //     meta.register_count_two = 0;
-      // }
+      /*
+      Cleanup procedure: if either slot is already filled but can be cleared, clear it.
 
-      //TODO add in cleanup code here
-      // if both slots are filled, but their time diff is really large OR their freq is 0
-      // NOTE: both slots must have the same values
-      // Wipe them away, reset their count, and use the slots
+      We determine if a slot can be cleared if it has a count of greater than 2 but its (combined) timestamp is
+      so far off that it should be disregarded.
+      */
+      if(meta.register_count_one > 1
+          && (meta.register_freq_one <= 0 || (standard_metadata.ingress_global_timestamp - meta.register_time_one) >= 10000000)){
+          meta.register_count_one = 0;
+          meta.register_time_one = 0;
+          meta.register_freq_one = 0;
+      }
+
+      if(meta.register_count_two > 1
+          && (meta.register_freq_two <= 0 || (standard_metadata.ingress_global_timestamp - meta.register_time_two) >= 10000000)){
+         meta.register_count_two = 0;
+         meta.register_time_two = 0;
+         meta.register_freq_two = 0;
+      }
 
     }
 
@@ -354,14 +355,14 @@ control MyIngress(inout headers hdr,
         if(time_diff < 100){
             global_freq = global_freq << 1;
         } else if(time_diff < 1000){
-          //no-op
-        } else if(time_diff < 10000) {
-            global_freq = global_freq >> 1;
+          global_freq = (global_freq + 1);
         } else if(time_diff < 100000) {
-            global_freq = global_freq >> 2;
+            global_freq = global_freq >> 1;
         } else if(time_diff < 1000000) {
-            global_freq = global_freq >> 3;
+            global_freq = global_freq >> 2;
         } else if(time_diff < 10000000) {
+            global_freq = global_freq >> 3;
+        } else if(time_diff < 100000000) {
             global_freq = global_freq >> 4;
         } else {
             global_freq = global_freq >> 5;
@@ -387,6 +388,8 @@ control MyIngress(inout headers hdr,
 
     }
 
+    // Table to hold throttle configuration with threshold value
+    // Could be extended to set different threshold frequencies based on packet values
     table throttle {
         key = {
             meta.do_drop: exact;
@@ -394,10 +397,12 @@ control MyIngress(inout headers hdr,
         actions = {
             throttle_packets;
         }
-        default_action = throttle_packets(2,1000);
+        default_action = throttle_packets(2, FREQ_DROP_THRESHOLD);
         size = 1024;
     }
 
+    // Simple table: if a packet do_drop metadata = 1 => drop it!
+    // Could be extended to let by certain types of packets (high priority?)
     table drop_table {
         key = {
             meta.do_drop: exact;
@@ -410,6 +415,7 @@ control MyIngress(inout headers hdr,
         }
     }
 
+    // Table used to print useful debug values - feel free to remove for production
     table debug {
         key = {
             meta.do_drop: exact;

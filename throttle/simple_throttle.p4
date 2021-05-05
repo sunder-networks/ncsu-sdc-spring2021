@@ -10,7 +10,6 @@
 
 const bit<16> TYPE_IPV4 = 0x0800;
 const bit<16> TYPE_IPV6 = 0x86DD;
-const bit<16> TYPE_FEED = 0xFEED;
 
 typedef bit<9>  egressSpec_t;
 
@@ -38,13 +37,6 @@ header ipv4_t {
 /*************************************************************************
 *********************** S T R U C T S  ***********************************
 *************************************************************************/
-
-struct freq_entry {
-    bit<32> srcAddr;
-    bit<32> dstAddr;
-    bit<32> freq;
-    bit<48> ingress_time;
-}
 
 struct metadata {
     bit<8> do_drop;
@@ -161,18 +153,17 @@ control MyIngress(inout headers hdr,
         global_freq = (global_freq + 2);
 
         // Approximation of division based on time difference
-        // TODO - improve this to be more adaptive so as to prevent runaway situations
         if(time_diff < 100){
             global_freq = global_freq << 1;
         } else if(time_diff < 1000){
-          //no-op
-        } else if(time_diff < 10000) {
-            global_freq = global_freq >> 1;
+          global_freq = (global_freq + 1);
         } else if(time_diff < 100000) {
-            global_freq = global_freq >> 2;
+            global_freq = global_freq >> 1;
         } else if(time_diff < 1000000) {
-            global_freq = global_freq >> 3;
+            global_freq = global_freq >> 2;
         } else if(time_diff < 10000000) {
+            global_freq = global_freq >> 3;
+        } else if(time_diff < 100000000) {
             global_freq = global_freq >> 4;
         } else {
             global_freq = global_freq >> 5;
@@ -198,6 +189,8 @@ control MyIngress(inout headers hdr,
 
     }
 
+    // Table to hold throttle configuration with threshold value
+    // Could be extended to set different threshold frequencies based on packet values
     table throttle {
         key = {
             meta.do_drop: exact;
@@ -209,6 +202,8 @@ control MyIngress(inout headers hdr,
         size = 1024;
     }
 
+    // Simple table: if a packet do_drop metadata = 1 => drop it!
+    // Could be extended to let by certain types of packets (high priority?)
     table drop_table {
         key = {
             meta.do_drop: exact;
@@ -218,6 +213,7 @@ control MyIngress(inout headers hdr,
         }
     }
 
+    // Table used to print useful debug values - feel free to remove for production
     table debug {
         key = {
             meta.do_drop: exact;
@@ -235,9 +231,6 @@ control MyIngress(inout headers hdr,
         my_ports.apply();
         throttle.apply();
         drop_table.apply();
-        if (hdr.ipv4.isValid()){
-            //throttle.apply();
-        }
         debug.apply();
     }
 }
