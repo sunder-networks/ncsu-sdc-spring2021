@@ -1,6 +1,10 @@
 # ncsu-sdc-spring2021
 NC State Senior Design Class Spring 2021
 
+### Apps
+
+Other than the provided example code in this directory, there are 3 P4 apps included in this repository: DDoS, INT, and Throttle. Each has its own directory including a README, Makefile, Source Code and other resources.
+
 ### Getting Started
 Visual workflow
 ```
