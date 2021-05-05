@@ -10,6 +10,14 @@ This app also drops ICMP packets by default so as to mitigate ICMP flood attacks
 
 Before setup, ensure you have docker and make installed.
 
+Execute the Following (each in a different shell window or screen)
+
+`make build`
+
+`make start`
+
+`make set-pipeline`
+
 ## Populate tables
 
 Execute the following in the P4 Runtime Shell
